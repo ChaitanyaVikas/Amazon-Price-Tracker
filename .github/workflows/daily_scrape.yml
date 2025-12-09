@@ -1,0 +1,49 @@
+name: Daily Amazon Tracker
+
+# TRIGGER: When to run?
+on:
+  schedule:
+    # This is "Cron" syntax. 
+    # "0 9 * * *" means "Run at 09:00 UTC every day"
+    # You can change it to "0 */4 * * *" to run every 4 hours.
+    - cron: '0 9 * * *' 
+  # Allow us to run it manually from the GitHub website to test it
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape_and_save:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Get the code from the repo
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # 2. Install Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # 3. Install Libraries
+      - name: Install Dependencies
+        run: |
+          pip install requests beautifulsoup4
+
+      # 4. Run the Script
+      - name: Run Price Tracker
+        run: python tracker.py
+
+      # 5. SAVE THE DATA (The Magic Part)
+      # GitHub Actions runs on a temporary computer. If we don't commit the .db file
+      # back to the repository, the data disappears when the run ends.
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "actions@github.com"
+          git add amazon_prices.db
+          git commit -m "📈 Auto-update price database" || exit 0
+          git push
