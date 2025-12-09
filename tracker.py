@@ -1,28 +1,67 @@
 import requests
 from bs4 import BeautifulSoup
 import datetime
-import csv
-import time
+import sqlite3
 
 # ---------------------------------------------------------
 # CONFIGURATION
 # ---------------------------------------------------------
-# The Product URL you want to track (Example: A Sony Headphone)
-# You can replace this with ANY Amazon product link
+# You can change this URL to any product you want to track
 URL = 'https://www.amazon.in/Sony-WH-1000XM5-Cancelling-Headphones-Connectivity/dp/B09XS7JWHH'
+DB_NAME = 'amazon_prices.db'
 
-# The "ID Card" for our script. This makes Amazon think we are a browser.
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-def get_product_info(url):
+# ---------------------------------------------------------
+# DATABASE FUNCTIONS
+# ---------------------------------------------------------
+def init_db():
     """
-    Fetches the Amazon page and extracts Title and Price.
+    Creates the database and the table if they don't exist.
     """
     try:
-        # 1. SEND REQUEST
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS prices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT,
+                price REAL,
+                timestamp TEXT
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        print("✅ Database initialized.")
+    except Exception as e:
+        print(f"❌ Database Error: {e}")
+
+def save_to_db(title, price):
+    """
+    Inserts a new row into the SQL database.
+    """
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute('''
+            INSERT INTO prices (title, price, timestamp)
+            VALUES (?, ?, ?)
+        ''', (title, price, timestamp))
+        conn.commit()
+        conn.close()
+        print(f"💾 Saved to SQL Database: ₹{price} at {timestamp}")
+    except Exception as e:
+        print(f"❌ Save Error: {e}")
+
+# ---------------------------------------------------------
+# SCRAPING FUNCTION
+# ---------------------------------------------------------
+def get_product_info(url):
+    try:
         page = requests.get(url, headers=HEADERS)
         
         # Check if Amazon blocked us
@@ -30,67 +69,44 @@ def get_product_info(url):
             print(f"❌ Error: Amazon returned status code {page.status_code}")
             return None
 
-        # 2. PARSE HTML
         soup = BeautifulSoup(page.content, "html.parser")
 
-        # 3. EXTRACT TITLE
-        # Amazon usually puts the title in a span with id="productTitle"
-        title = soup.find(id='productTitle').get_text().strip()
+        # Extract Title
+        title_tag = soup.find(id='productTitle')
+        if not title_tag:
+            print("⚠️ Could not find product title. Check if the URL is valid.")
+            return None
+            
+        title = title_tag.get_text().strip()
 
-        # 4. EXTRACT PRICE
-        # Price is tricky. It's usually in a class like "a-price-whole"
-        # We try a few common price locations
+        # Extract Price
+        # We try a few different classes because Amazon changes them often
         price_whole = soup.find(class_='a-price-whole')
-        
         if price_whole:
-            # Get text and remove commas (e.g., "24,000" -> "24000")
-            current_price = price_whole.get_text().replace(',', '').replace('.', '').strip()
-            current_price = float(current_price)
+            current_price = float(price_whole.get_text().replace(',', '').replace('.', '').strip())
         else:
-            print("⚠️ Could not find price tag. Amazon might have changed the layout.")
+            print("⚠️ Could not find price tag.")
             current_price = 0.0
 
-        # 5. GET TIMESTAMP
-        timestamp = datetime.datetime.now()
-
-        print(f"✅ Found: {title[0:20]}...")
-        print(f"💰 Price: ₹{current_price}")
-        
-        return [title, current_price, timestamp]
+        print(f"🔎 Found: {title[:30]}... | Price: {current_price}")
+        return title, current_price
 
     except Exception as e:
-        print(f"❌ An error occurred: {e}")
+        print(f"❌ Scraping Error: {e}")
         return None
 
-def save_to_csv(data):
-    """
-    Appends the data to a CSV file (our database for now).
-    """
-    if data is None:
-        return
-
-    filename = 'price_history.csv'
-    
-    # Open file in 'append' mode ('a')
-    with open(filename, mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        # Write the data [Title, Price, Date]
-        writer.writerow(data)
-    
-    print(f"💾 Saved to {filename}")
-
-# ---------------------------------------------------------
 # ---------------------------------------------------------
 # MAIN EXECUTION (CLOUD READY)
 # ---------------------------------------------------------
 if __name__ == "__main__":
-    # 1. Setup DB
+    # 1. Initialize the Database
     init_db()
     
-    # 2. Run Once
+    # 2. Run the Scraper
     print("🤖 Cloud Bot Checking Prices...")
     data = get_product_info(URL)
     
+    # 3. Save Data if found
     if data:
         save_to_db(data[0], data[1])
         print("✅ Job Done.")
